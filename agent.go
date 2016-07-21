@@ -4,8 +4,11 @@ import (
 	"appnet-agent/daemon"
 	"appnet-agent/etcd"
 	"appnet-agent/log"
+	"encoding/json"
 	"os"
 	"time"
+
+	fsouza "github.com/fsouza/go-dockerclient"
 )
 
 //1.监听本地docker事件,监听网络的变化
@@ -39,7 +42,7 @@ import (
 //删除指定的网络？还是告知有多少台主机加入了指定的网咯?
 //暂时解决方法,假设添加主机必定能能够成功创建macvlan网络，如果失败，添加一条日志。到时候该主机添加网络失败
 //再进行处理
-func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, pool *VirNetworkPool) error {
+func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, pool *VirNetworkPool, hostIP string) error {
 	daemonNetwork, err := dockerClient.ListNetworks()
 	if err != nil {
 		log.Error("get daemon network info fail")
@@ -56,7 +59,7 @@ func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, po
 	}
 
 	//获取etcd中记录的该节点所有信息
-	//这里要json转换
+	//
 	etcdNetwork, err := etcdClient.GetNetworks()
 	if err != nil {
 		log.Error("get etcd netwokr info fail")
@@ -64,41 +67,75 @@ func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, po
 	}
 
 	//比较daemonNetwork和etcdNetwork, 找到存在etcd但不存在于daemon中的macvlan网络,忽略存在于daemon但不存在于etcd的macvlan
+	//FIXME:这里最好坐下网络信息匹配，单凭名字来匹配会出现问题的。
 	var inexistNetwork []string
 	for _, j := range etcdNetwork {
 		for _, v := range daemonNetwork {
 			//已存在
-			log.Debug("%v vs %v", j.Name, v.Name)
-			if v.Name == j.Name {
+			log.Debug("%v vs %v", j, v.Name)
+			if v.Name == j {
 				break
 			}
 			log.Debug("%v network doesn't exist in local daemon network")
-			inexistNetwork = append(inexistNetwork, j.Name)
+			inexistNetwork = append(inexistNetwork, j)
 		}
 	}
 
 	//根据参数创建指定的网络
 	//失败了怎么处理?
+
 	for _, j := range inexistNetwork {
+		var param fsouza.CreateOption
 
+		//获取对应网络的macvlan网络创建参数
+		byteContent, err := etcdClient.GetNetworkParam(j)
+		if err != nil {
+			//不能直接返回，需要做清理?
+			log.Error(err)
+			return err
+		}
+
+		err := json.Unmarshal(byteContent, &param)
+		if err != nil {
+			log.Error(err)
+			return err
+		}
+
+		//创建缺失的网络
+		newNetwork, err := dockerClient.CreateNetwork(param)
+		if err != nil {
+			log.Error(err)
+			return err
+		}
+
+		//获取详细信息
+		fullNet, err := dockerClient.InfoNetwork(newNetwork.ID)
+		if err != nil {
+			log.Error(err)
+			//清理
+			dockerClient.RemoveNetwork(fullNet.ID)
+		}
+
+		//FIXME:失败，如何处理
+		byteContent, err := json.Marshal(fullNet)
+		if err != nil {
+			log.Error(err)
+
+		}
+
+		//更新到etcd中
+		err := etcdClient.UpdateNetworkData(hostIP, j, string(byteContent))
+		if err != nil {
+			log.Error(err)
+		}
+
+		//更新到pool中
+		pool.Networks[j] = fullNet
 	}
-
-	//获取对应网络的macvlan网络创建参数
-
-	//创建缺失的网络
-
-	//更新到etcd中
 
 }
 
 func main() {
-	/*
-		err := initLogger("./agent.log")
-		if err != nil {
-			panic(err)
-		}
-		NetworkListen()
-	*/
 	etcdClient := etcd.InitEtcdClient("192.168.4.11:2379")
 	if client == nil {
 		log.Error("init etcd fail")
@@ -111,6 +148,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	//FIXME:需要更好的获取主机IP的方法
 	nodeIp := dockerClient.GetNodeIP()
 	if len(nodeIp) == 0 {
 		log.Error("unabled to get current host ip")
@@ -127,7 +165,7 @@ func main() {
 	//
 	go func() {
 		for {
-			err := etcdClient.RegisterNode("192.168.14.14")
+			err := etcdClient.RegisterNode(nodeIp)
 
 			//如果etcd断开了，检测到etcd重新启动后，需要立即更新节点，避免主机认为节点已经断开连接
 			if err != nil {
@@ -144,6 +182,12 @@ func main() {
 		}
 
 	}()
+
+	err := syncPool()
+	if err != nil {
+		log.Error(err)
+		os.Exit(1)
+	}
 
 	time.Sleep(110000 * time.Second)
 

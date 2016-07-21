@@ -6,25 +6,29 @@ import (
 
 	fsouza "github.com/fsouza/go-dockerclient"
 
+	"appnet-agent/daemon"
 	"appnet-agent/log"
 )
 
 type VirNetworkPool struct {
 	lock     *sync.RWMutex
-	Networks map[string]fsouza.Network `json:"networks"`
+	Networks map[string]VirNetwork `json:"networks"`
+}
+
+type VirNetwork struct {
+	*fsouza.Network
 }
 
 func InitPool() *VirNetworkPool {
 	pool := VirNetworkPool{}
 	pool.lock = new(sync.RWMutex)
-	pool.Networks = make(map[string]fsouza.Network)
+	pool.Networks = make(map[string]VirNetwork)
 
 	return &pool
 }
 
 //需要放在这里吗?
 func (pool VirNetworkPool) SyncEtcd() {
-
 }
 
 func (pool VirNetworkPool) Lock() {
@@ -53,8 +57,8 @@ func (pool VirNetworkPool) RemoveNetwork(nid string) error {
 	}
 
 	delete(pool.Networks, nid)
-	//需要一个client实例，以下为参考..
-	err := fsouza.Client.RemoveNetwork(nid)
+
+	err := daemon.Client.RemoveNetwork(nid)
 	if err != nil {
 		log.Error("unable to remove %v for %v", nid, err)
 		return fmt.Errorf("unable to remove %v for %v", nid, err)
@@ -76,15 +80,13 @@ func (pool VirNetworkPool) CreateNetwork(opt fsouza.CreateNetworkOptions) error 
 		return fmt.Errorf("network %v has exist", nid)
 	}
 
-	//需要一个client实例，以下为参考..
-	newnet, err := fsouza.Client.CreateNetwork(opt)
+	newnet, err := daemon.Client.CreateNetwork(opt)
 	if err != nil {
 		log.Error("unable to create %v for %v", nid, err)
 		return fmt.Errorf("unable to create %v for %v", nid, err)
 	}
 
-	//需要一个client实例，以下为参考..
-	fullnet, err := fsouza.Client.NetworkInfo(newnet.ID)
+	fullnet, err := daemon.Client.NetworkInfo(newnet.ID)
 
 	pool.Networks[newnet.ID] = fullnet
 	//同步etcd上的数据..

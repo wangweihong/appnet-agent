@@ -19,7 +19,7 @@ type DockerClient struct {
 
 func InitDockerClient(endpoint string) *DockerClient {
 	var err error
-	client, err = fsouza.NewClient(endpoint)
+	client, err := fsouza.NewClient(endpoint)
 	if err != nil {
 		log.Debug("create Docker client fail for: %v", err)
 		return nil
@@ -114,7 +114,7 @@ func (c *DockerClient) GetNodeIP() string {
 func init() {
 	endpoint := "unix:///var/run/docker.sock"
 	var err error
-	Client, err = fsouza.NewClient(endpoint)
+	Client, err = InitDockerClient(endpoint)
 	if err != nil {
 		panic("Create docker client fail")
 	}

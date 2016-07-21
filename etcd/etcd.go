@@ -50,34 +50,80 @@ func (c *EtcdClient) ListenNetwork() {
 
 func (c *EtcdClient) GetNetworkParams() {
 
-	resp, err := c.Get(context.Background, paramDirNode, &client.GetOptions{Recursive})
+	key := paramDirNode
+	resp, err := c.Get(context.Background(), key, &client.GetOptions{Recursive: true})
 	if err != nil {
-		log.Error("Unabled to get key %v 's value: %v ", paramDirNode, err)
+		log.Error("Unabled to get key %v 's value: %v ", key, err)
 	}
 
 	log.Debug("resp:%v", resp)
 
 }
 
-func (c *EtcdClient) GetNetworks(ip, network string) ([]byte, error) {
-	if len(ip) == 0 || len(network) == 0 {
-		log.Error("ip or network is empty")
-		return []byte{}, fmt.Errorf("ip or network is empty")
+func (c *EtcdClient) GetNetworkParam(network string) ([]byte, error) {
+	if len(network) == 0 {
+		log.Error("network is empty")
+		return []byte{}, fmt.Errorf("network is empty")
 	}
 
-	key := networkDirNode + "/" + network + "/" + ip
-	//试试
-	resp, err := c.Get(context.Background(), key, client.GetOptions{Recursive: true})
+	key := paramDirNode + "/" + network
+	resp, err := c.Get(context.Background, key, nil)
 	if err != nil {
 		return []byte{}, err
 	}
 
-	log.Debug("resp:%v", resp)
-	return []byte{}, nil
+	return []byte(resp.Node.Value), nil
+
 }
 
-func (c *EtcdClient) UpdateData(key string, data []byte) {
-	c.Set(context.Background(), key, data)
+//更改为获取所有macvlan网络名
+func (c *EtcdClient) GetNetworks() ([]string, error) {
+
+	key := networkDirNode
+	//试试
+	resp, err := c.Get(context.Background(), key, &client.GetOptions{Recursive: true})
+	if err != nil {
+		return []string{}, err
+	}
+
+	log.Debug("resp:%v", resp)
+	var macvlanNetworks []string
+
+	for _, j := range resp.Node.Nodes {
+		macvlanNetworks = append(macvlanNetworks, j.Key)
+	}
+
+	return macvlanNetworks, nil
+}
+
+//获取指定主机节点的指定macvlan的详细信息
+func (c *EtcdClient) InfoNetwork(ip, network string) ([]string, error) {
+	if len(ip) == 0 || len(network) == 0 {
+		log.Error("ip or network is empty")
+		return []string{}, fmt.Errorf("ip or network is empty")
+	}
+	key := networkDirNode + "/" + network + "/" + ip
+	resp, err := c.Get(context.Background(), key, &client.GetOptions{Recursive: true})
+	if err != nil {
+		return []string{}, err
+	}
+
+	log.Debug("resp:%v", resp)
+
+	//需要考虑转换成何种类型的数据
+	return []string{}, nil
+
+}
+
+func (c *EtcdClient) UpdateNetworkData(ip, network, data []byte) error {
+	key := networkDirNode + "/" + network + "/" + ip
+	resp, err := e.Set(context.Background(), key, string(data), nil)
+	if err != nil {
+		return err
+	}
+
+	log.Debug("resp:%v", resp)
+	return nil
 }
 
 //这里需要放置在docker包里处理
@@ -88,7 +134,9 @@ func (c *EtcdClient) HandleNetworkEvent() {
 	case "create":
 		var opts fsouza.NetworkConnectionOptions
 		err := json.Unmarshal([]byte(resp.Node.Value), &opts)
-		log.Debug("opts")
+		if err != nil {
+			log.Debug("opts fail:%v", err)
+		}
 
 	case "delete":
 	case "compareAndSwap":
