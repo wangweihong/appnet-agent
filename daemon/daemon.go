@@ -8,13 +8,20 @@ import (
 )
 
 var (
-	Client *fsouza.Client
+	Client *DockerClient
 
 	//Channel用来接收etcd传递过来的事件?
 )
 
 type DockerClient struct {
 	*fsouza.Client
+}
+
+type DaemonNetworkEvent struct {
+	Action   string //网络事件的动作
+	Network  string //这个是ID还是网络名?
+	Type     string
+	Endpoint string //只有动作为connect和disconnect时有效
 }
 
 func InitDockerClient(endpoint string) *DockerClient {
@@ -29,50 +36,73 @@ func InitDockerClient(endpoint string) *DockerClient {
 }
 
 //要相应的更新etcd中数据才行
-func NetworkListen() {
-	eventChan := make(chan *fsouza.APIEvents)
-	err := Client.AddEventListener(eventChan)
-	if err != nil {
-		log.Error("fail to add listener")
-		return
-	}
-	for {
-		event := <-eventChan
+func DaemonListenNetwork() <-chan DaemonNetworkEvent {
+	daemonEventChan := make(chan DaemonNetworkEvent)
+	go func() {
+		eventChan := make(chan *fsouza.APIEvents)
+		err := Client.AddEventListener(eventChan)
+		if err != nil {
+			log.Error("fail to add listener")
+			return
+		}
+		for {
+			event := <-eventChan
 
-		log.Debug("Action:%v\n", event.Action)
-		log.Debug("Type:%v\n", event.Type)
-		log.Debug("Actor:%v __ %v\n", event.Actor.ID, event.Actor.Attributes)
-		attrs := event.Actor.Attributes
-		network, _ := attrs["name"]
-		netType, _ := attrs["type"]
-		containerEndpoin, _ := attrs["container"]
-		//only concern about network type event
-		if event.Type == "network" {
-			switch event.Action {
-			case "create":
-				if len(network) == 0 || len(netType) == 0 {
-					log.Error("daemon event attributes has changed")
-					continue
+			//忽略非网络事件
+			if event.Type == "network" {
+				log.Debug("Action:%v\n", event.Action)
+				log.Debug("Type:%v\n", event.Type)
+				log.Debug("Actor:%v __ %v\n", event.Actor.ID, event.Actor.Attributes)
+				//only concern about network type event
+				attrs := event.Actor.Attributes
+				network, _ := attrs["name"]
+				netType, _ := attrs["type"]
+				containerEndpoint, _ := attrs["container"]
+				networkEvent := DaemonNetworkEvent{
+					Action:   event.Action,
+					Network:  network,
+					Type:     netType,
+					Endpoint: containerEndpoint,
 				}
 
-			case "destroy":
 				if len(network) == 0 || len(netType) == 0 {
-					log.Error("daemon event attributes has changed")
-					continue
+					log.Warn("daemon event attributes has changed")
 				}
-			case "connect":
-				if len(network) == 0 || len(netType) == 0 || len(containerEndpoin) == 0 {
-					log.Error("daemon event attributes has changed")
-					continue
+				if event.Action == "disconnect" || event.Action == "connect" {
+					if len(containerEndpoint) == 0 {
+						log.Warn("daemon event attributes has changed")
+					}
 				}
-			case "disconnect":
-				if len(network) == 0 || len(netType) == 0 || len(containerEndpoin) == 0 {
-					log.Error("daemon event attributes has changed")
-					continue
-				}
+				daemonEventChan <- networkEvent
+
+				/*
+					switch event.Action {
+					case "create":
+						if len(network) == 0 || len(netType) == 0 {
+							log.Error("daemon event attributes has changed")
+							continue
+						}
+					case "destroy":
+						if len(network) == 0 || len(netType) == 0 {
+							log.Error("daemon event attributes has changed")
+							continue
+						}
+					case "connect":
+						if len(network) == 0 || len(netType) == 0 || len(containerEndpoint) == 0 {
+							log.Error("daemon event attributes has changed")
+							continue
+						}
+					case "disconnect":
+						if len(network) == 0 || len(netType) == 0 || len(containerEndpoint) == 0 {
+							log.Error("daemon event attributes has changed")
+							continue
+						}
+					}
+				*/
 			}
 		}
-	}
+	}()
+	return daemonEventChan
 }
 
 //创建docker network
@@ -114,7 +144,7 @@ func (c *DockerClient) GetNodeIP() string {
 func init() {
 	endpoint := "unix:///var/run/docker.sock"
 	var err error
-	Client, err = InitDockerClient(endpoint)
+	Client = InitDockerClient(endpoint)
 	if err != nil {
 		panic("Create docker client fail")
 	}

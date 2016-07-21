@@ -16,7 +16,7 @@ type VirNetworkPool struct {
 }
 
 type VirNetwork struct {
-	*fsouza.Network
+	fsouza.Network
 }
 
 func InitPool() *VirNetworkPool {
@@ -64,7 +64,8 @@ func (pool VirNetworkPool) RemoveNetwork(nid string) error {
 		return fmt.Errorf("unable to remove %v for %v", nid, err)
 	}
 
-	//同步etcd上的数据..
+	//TODO:让调用者去调用
+
 	return nil
 }
 
@@ -74,21 +75,16 @@ func (pool VirNetworkPool) CreateNetwork(opt fsouza.CreateNetworkOptions) error 
 
 	log.Debug("%v", pool)
 
-	_, exists := pool.Networks[nid]
-	if !exists {
-		log.Error("network %v has exist", nid)
-		return fmt.Errorf("network %v has exist", nid)
-	}
-
 	newnet, err := daemon.Client.CreateNetwork(opt)
 	if err != nil {
-		log.Error("unable to create %v for %v", nid, err)
-		return fmt.Errorf("unable to create %v for %v", nid, err)
+		log.Error("unable to create %v for %v", opt.Name, err)
+		return fmt.Errorf("unable to create %v for %v", opt.Name, err)
 	}
 
 	fullnet, err := daemon.Client.NetworkInfo(newnet.ID)
 
-	pool.Networks[newnet.ID] = fullnet
+	virtnet := VirNetwork{*fullnet}
+	pool.Networks[newnet.ID] = virtnet
 	//同步etcd上的数据..
 	return nil
 }

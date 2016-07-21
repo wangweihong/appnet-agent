@@ -25,29 +25,43 @@ var (
 	RegisterNodeTTL = 5 * time.Second
 )
 
-//节点：/appnet/macvlan/<macvlan name>/...
-
-func (c *EtcdClient) ListenNetwork() {
-	watcher := c.Watcher(networkDirNode, &client.WatcherOptions{Recursive: true})
-
-	for {
-		res, err := watcher.Next(context.Background())
-		if err != nil {
-			//	if err.Error() == client.ErrClusterUnavailable.Error() {
-			log.Error("%v", err)
-			time.Sleep(1 * time.Second)
-			continue
-			//}
-		}
-
-		switch res.Action {
-		case "delete", "create", "update", "compareAndSwap", "compareAndDelete":
-			log.Debug("%v(%v):%v", res.Node.Key, res.Node.Value, res.Action)
-		}
-
-	}
+type EtcdNetworkEvent struct {
+	*client.Response
 }
 
+type NetworkParam struct {
+	*fsouza.CreateNetworkOptions
+}
+
+//TODO:需要返回一个只包含网络/容器信息的结构体
+func (c *EtcdClient) EtcdListenNetwork() <-chan EtcdNetworkEvent {
+	dests := make(chan EtcdNetworkEvent)
+	watcher := c.Watcher(networkDirNode, &client.WatcherOptions{Recursive: true})
+
+	//异步监听
+	go func() {
+		for {
+			res, err := watcher.Next(context.Background())
+			if err != nil {
+				log.Error("%v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			log.Debug("action==resp :%v", res)
+			switch res.Action {
+			case "delete", "create", "update", "compareAndSwap", "compareAndDelete":
+				log.Debug("%v(%v):%v", res.Node.Key, res.Node.Value, res.Action)
+				response := EtcdNetworkEvent{res}
+				dests <- response
+			}
+		}
+	}()
+
+	return dests
+}
+
+/*
 func (c *EtcdClient) GetNetworkParams() {
 
 	key := paramDirNode
@@ -57,8 +71,8 @@ func (c *EtcdClient) GetNetworkParams() {
 	}
 
 	log.Debug("resp:%v", resp)
-
 }
+*/
 
 func (c *EtcdClient) GetNetworkParam(network string) ([]byte, error) {
 	if len(network) == 0 {
@@ -67,20 +81,17 @@ func (c *EtcdClient) GetNetworkParam(network string) ([]byte, error) {
 	}
 
 	key := paramDirNode + "/" + network
-	resp, err := c.Get(context.Background, key, nil)
+	resp, err := c.Get(context.Background(), key, nil)
 	if err != nil {
 		return []byte{}, err
 	}
 
 	return []byte(resp.Node.Value), nil
-
 }
 
 //更改为获取所有macvlan网络名
 func (c *EtcdClient) GetNetworks() ([]string, error) {
-
 	key := networkDirNode
-	//试试
 	resp, err := c.Get(context.Background(), key, &client.GetOptions{Recursive: true})
 	if err != nil {
 		return []string{}, err
@@ -112,12 +123,11 @@ func (c *EtcdClient) InfoNetwork(ip, network string) ([]string, error) {
 
 	//需要考虑转换成何种类型的数据
 	return []string{}, nil
-
 }
 
-func (c *EtcdClient) UpdateNetworkData(ip, network, data []byte) error {
+func (c *EtcdClient) UpdateNetworkData(ip, network string, data []byte) error {
 	key := networkDirNode + "/" + network + "/" + ip
-	resp, err := e.Set(context.Background(), key, string(data), nil)
+	resp, err := c.Set(context.Background(), key, string(data), nil)
 	if err != nil {
 		return err
 	}
