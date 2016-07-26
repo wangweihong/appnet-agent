@@ -43,28 +43,27 @@ func (pool VirNetworkPool) RemoveNetwork(nid string) error {
 	pool.Lock()
 	defer pool.Unlock()
 
-	log.Debug("%v", pool)
+	log.Logger.Debug("%v", pool)
 
 	net, exists := pool.Networks[nid]
 	if !exists {
-		log.Error("network %v doesn't exist", nid)
+		log.Logger.Error("network %v doesn't exist", nid)
 		return fmt.Errorf("network %v doesn't exist", nid)
 	}
 
 	if len(net.Containers) != 0 {
-		log.Error("network %v still has associated containers", nid)
+		log.Logger.Error("network %v still has associated containers", nid)
 		return fmt.Errorf("network %v still has associated containers", nid)
 	}
 
 	delete(pool.Networks, nid)
 
+	//FIXME
 	err := daemon.Client.RemoveNetwork(nid)
 	if err != nil {
-		log.Error("unable to remove %v for %v", nid, err)
+		log.Logger.Error("unable to remove %v for %v", nid, err)
 		return fmt.Errorf("unable to remove %v for %v", nid, err)
 	}
-
-	//TODO:让调用者去调用
 
 	return nil
 }
@@ -73,18 +72,18 @@ func (pool VirNetworkPool) CreateNetwork(opt fsouza.CreateNetworkOptions) error 
 	pool.Lock()
 	defer pool.Unlock()
 
-	log.Debug("%v", pool)
+	log.Logger.Debug("%v", pool)
 
 	newnet, err := daemon.Client.CreateNetwork(opt)
 	if err != nil {
-		log.Error("unable to create %v for %v", opt.Name, err)
+		log.Logger.Error("unable to create %v for %v", opt.Name, err)
 		return fmt.Errorf("unable to create %v for %v", opt.Name, err)
 	}
 
 	fullnet, err := daemon.Client.NetworkInfo(newnet.ID)
 
 	virtnet := VirNetwork{*fullnet}
+	//FIXME:移除出去?
 	pool.Networks[newnet.ID] = virtnet
-	//同步etcd上的数据..
 	return nil
 }

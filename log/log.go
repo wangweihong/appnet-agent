@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	logHandler *logs.BeeLogger
+	Logger *logs.BeeLogger
 )
 
+/*
 func Debug(format string, v ...interface{}) {
 	logHandler.Debug(format, v...)
 }
@@ -39,6 +40,7 @@ func Critical(format string, v ...interface{}) {
 func Emergency(format string, v ...interface{}) {
 	logHandler.Emergency(format, v...)
 }
+*/
 
 func initLogger(logfile string) error {
 
@@ -67,7 +69,7 @@ func initLogger(logfile string) error {
 
 	jsonConfig := fmt.Sprintf("{\"filename\":\"%s\",\"maxlines\":5000,\"maxsize\":10240000}", logfile)
 	log.SetLogger("file", jsonConfig)
-	logHandler = log
+	Logger = log
 	return nil
 }
 

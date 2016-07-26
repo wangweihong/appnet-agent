@@ -28,7 +28,7 @@ func InitDockerClient(endpoint string) *DockerClient {
 	var err error
 	client, err := fsouza.NewClient(endpoint)
 	if err != nil {
-		log.Debug("create Docker client fail for: %v", err)
+		log.Logger.Debug("create Docker client fail for: %v", err)
 		return nil
 	}
 
@@ -42,7 +42,7 @@ func DaemonListenNetwork() <-chan DaemonNetworkEvent {
 		eventChan := make(chan *fsouza.APIEvents)
 		err := Client.AddEventListener(eventChan)
 		if err != nil {
-			log.Error("fail to add listener")
+			log.Logger.Error("fail to add listener")
 			return
 		}
 		for {
@@ -50,55 +50,60 @@ func DaemonListenNetwork() <-chan DaemonNetworkEvent {
 
 			//忽略非网络事件
 			if event.Type == "network" {
-				log.Debug("Action:%v\n", event.Action)
-				log.Debug("Type:%v\n", event.Type)
-				log.Debug("Actor:%v __ %v\n", event.Actor.ID, event.Actor.Attributes)
+
 				//only concern about network type event
 				attrs := event.Actor.Attributes
 				network, _ := attrs["name"]
 				netType, _ := attrs["type"]
-				containerEndpoint, _ := attrs["container"]
-				networkEvent := DaemonNetworkEvent{
-					Action:   event.Action,
-					Network:  network,
-					Type:     netType,
-					Endpoint: containerEndpoint,
-				}
 
-				if len(network) == 0 || len(netType) == 0 {
-					log.Warn("daemon event attributes has changed")
-				}
-				if event.Action == "disconnect" || event.Action == "connect" {
-					if len(containerEndpoint) == 0 {
-						log.Warn("daemon event attributes has changed")
+				if netType == "macvlan" {
+
+					log.Logger.Debug("Action:%v", event.Action)
+					log.Logger.Debug("Type:%v", event.Type)
+					log.Logger.Debug("Actor:%v __ %v", event.Actor.ID, event.Actor.Attributes)
+					containerEndpoint, _ := attrs["container"]
+					networkEvent := DaemonNetworkEvent{
+						Action:   event.Action,
+						Network:  network,
+						Type:     netType,
+						Endpoint: containerEndpoint,
 					}
-				}
-				daemonEventChan <- networkEvent
 
-				/*
-					switch event.Action {
-					case "create":
-						if len(network) == 0 || len(netType) == 0 {
-							log.Error("daemon event attributes has changed")
-							continue
-						}
-					case "destroy":
-						if len(network) == 0 || len(netType) == 0 {
-							log.Error("daemon event attributes has changed")
-							continue
-						}
-					case "connect":
-						if len(network) == 0 || len(netType) == 0 || len(containerEndpoint) == 0 {
-							log.Error("daemon event attributes has changed")
-							continue
-						}
-					case "disconnect":
-						if len(network) == 0 || len(netType) == 0 || len(containerEndpoint) == 0 {
-							log.Error("daemon event attributes has changed")
-							continue
+					if len(network) == 0 || len(netType) == 0 {
+						log.Logger.Warn("daemon event attributes has changed")
+					}
+					if event.Action == "disconnect" || event.Action == "connect" {
+						if len(containerEndpoint) == 0 {
+							log.Logger.Warn("daemon event attributes has changed")
 						}
 					}
-				*/
+					daemonEventChan <- networkEvent
+
+					/*
+						switch event.Action {
+						case "create":
+							if len(network) == 0 || len(netType) == 0 {
+								log.Logger.Error("daemon event attributes has changed")
+								continue
+							}
+						case "destroy":
+							if len(network) == 0 || len(netType) == 0 {
+								log.Logger.Error("daemon event attributes has changed")
+								continue
+							}
+						case "connect":
+							if len(network) == 0 || len(netType) == 0 || len(containerEndpoint) == 0 {
+								log.Logger.Error("daemon event attributes has changed")
+								continue
+							}
+						case "disconnect":
+							if len(network) == 0 || len(netType) == 0 || len(containerEndpoint) == 0 {
+								log.Logger.Error("daemon event attributes has changed")
+								continue
+							}
+						}
+					*/
+				}
 			}
 		}
 	}()
@@ -114,7 +119,7 @@ func NetworkCreate(opt fsouza.CreateNetworkOptions) error {
 		return err
 	}
 
-	log.Debug("%v", network)
+	log.Logger.Debug("%v", network)
 	return nil
 }
 
@@ -127,14 +132,14 @@ func NetworkRemove(id string) {
 func (c *DockerClient) GetNodeIP() string {
 	dockerInfo, err := c.Info()
 	if err != nil {
-		log.Error("unable to get docker info: %v", err)
+		log.Logger.Error("unable to get docker info: %v", err)
 		return ""
 	}
 
 	advertise := dockerInfo.ClusterAdvertise
 	slice := strings.Split(advertise, ":")
 	if len(slice) != 2 {
-		log.Error("ClusterAdvertise info has change")
+		log.Logger.Error("ClusterAdvertise info has change")
 		return ""
 	}
 
