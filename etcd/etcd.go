@@ -3,6 +3,7 @@ package etcd
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,10 +15,16 @@ import (
 )
 
 var (
-	macvlanDirNode = "/macvlan/"
-	agentDirNode   = "/macvlan/nodes/"
-	networkDirNode = "/macvlan/network/nodes"
-	paramDirNode   = "/macvlan/network/params"
+	macvlanDirNode = "/macvlan"
+	//保存所有主机节点IP
+	agentDirNode = macvlanDirNode + "/nodes/"
+	//保持着所有虚拟网络中对应的真实macvlan的详细信息
+	//如/macvlan/network/nodes/test123/192.168.14.1 表示的是test123这个macvlan虚拟网络在192.168.14.1主机节点的信息
+	networkDirNode = macvlanDirNode + "/network/nodes"
+	//保存所有macvlan网络的创建参数，一旦移除，意味着移除网络
+	paramDirNode = macvlanDirNode + "/network/params"
+	//保存着虚拟macvlan网络的信息，是各个主机节点上的真实macvlan网络的抽象
+	clusterNode = macvlanDirNode + "/cluster"
 
 	//ErrClusterUnavailable = errors.New("client: etcd cluster is unavailable or misconfigured")
 	ErrClusterUnavailable = client.ErrClusterUnavailable
@@ -132,7 +139,8 @@ func (c *EtcdClient) GetNetworks() ([]string, error) {
 	var macvlanNetworks []string
 
 	for _, j := range resp.Node.Nodes {
-		macvlanNetworks = append(macvlanNetworks, j.Key)
+		//需要的是网络名
+		macvlanNetworks = append(macvlanNetworks, filepath.Base(j.Key))
 	}
 
 	return macvlanNetworks, nil
@@ -190,6 +198,31 @@ func (c *EtcdClient) UpdateNetworkData(ip, network string, data []byte) error {
 	}
 
 	log.Logger.Debug("resp:%v", resp)
+	return nil
+}
+
+func (c *EtcdClient) UpdateClusterData(env, clusterNetworkID string, data []byte) error {
+	log.Logger.Debug("updateCluterData env:%v,clusterNetworkID:%v, data:%v", env, clusterNetworkID, string(data))
+	key := clusterNode + "/" + env + "/" + clusterNetworkID
+	_, err := c.Set(context.Background(), key, string(data), nil)
+	if err != nil {
+
+		log.Logger.Debug("UpdateClusterData fail for:%v", err)
+		return err
+	}
+	return nil
+}
+
+func (c *EtcdClient) RemoveClusterData(env, clusterNetworkID string) error {
+	log.Logger.Debug("removeCluterData env:%v,clusterNetworkID:%v", env, clusterNetworkID)
+	key := clusterNode + "/" + env + "/" + clusterNetworkID
+	_, err := c.Delete(context.Background(), key, nil)
+	if err != nil {
+
+		log.Logger.Debug("removeClusterData fail for:%v", err)
+		return err
+
+	}
 	return nil
 }
 
