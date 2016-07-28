@@ -162,6 +162,9 @@ func (c *EtcdClient) InfoNetwork(ip, network string) (*fsouza.Network, error) {
 		}
 		return nil, err
 	}
+	if len(resp.Node.Value) == 0 {
+		return nil, nil
+	}
 
 	log.Logger.Debug("resp:%v", resp)
 

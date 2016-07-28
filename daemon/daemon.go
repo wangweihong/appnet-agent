@@ -19,7 +19,7 @@ type DockerClient struct {
 
 type DaemonNetworkEvent struct {
 	Action   string //网络事件的动作
-	Network  string //这个是ID还是网络名?
+	Network  string //这个是ID
 	Type     string
 	Endpoint string //只有动作为connect和disconnect时有效
 }
@@ -79,30 +79,6 @@ func DaemonListenNetwork() <-chan DaemonNetworkEvent {
 					}
 					daemonEventChan <- networkEvent
 
-					/*
-						switch event.Action {
-						case "create":
-							if len(network) == 0 || len(netType) == 0 {
-								log.Logger.Error("daemon event attributes has changed")
-								continue
-							}
-						case "destroy":
-							if len(network) == 0 || len(netType) == 0 {
-								log.Logger.Error("daemon event attributes has changed")
-								continue
-							}
-						case "connect":
-							if len(network) == 0 || len(netType) == 0 || len(containerEndpoint) == 0 {
-								log.Logger.Error("daemon event attributes has changed")
-								continue
-							}
-						case "disconnect":
-							if len(network) == 0 || len(netType) == 0 || len(containerEndpoint) == 0 {
-								log.Logger.Error("daemon event attributes has changed")
-								continue
-							}
-						}
-					*/
 				}
 			}
 		}
