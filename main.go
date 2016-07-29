@@ -52,7 +52,7 @@ func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, po
 	log.Logger.Debug("macvlan networ in daemon: %v", daemonMaclvanNetwork)
 
 	//获取etcd中记录的该节点所有信息
-	etcdNetwork, err := etcdClient.GetNetworks()
+	etcdNetwork, err := etcdClient.GetAllNetworkCreateParams()
 	if err != nil {
 		log.Logger.Error("get all etcd network params fail: %v", err)
 		return err
