@@ -58,7 +58,6 @@ func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, po
 		log.Logger.Error("get daemon network info fail")
 		return err
 	}
-	log.Logger.Debug("daemonNetwork:%v", daemonNetwork)
 
 	//移除非macvlan的网络
 	var daemonMaclvanNetwork []fsouza.Network
@@ -67,63 +66,88 @@ func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, po
 			daemonMaclvanNetwork = append(daemonMaclvanNetwork, v)
 		}
 	}
-	log.Logger.Debug("macvlan network: %v", daemonMaclvanNetwork)
+	log.Logger.Debug("macvlan networ in daemon: %v", daemonMaclvanNetwork)
 
 	//获取etcd中记录的该节点所有信息
 	etcdNetwork, err := etcdClient.GetNetworks()
 	if err != nil {
-		e := err.(client.Error)
-		if e.Code != client.ErrorCodeKeyNotFound {
-			log.Logger.Error("get etcd network info fail")
+		log.Logger.Error("get all etcd network params fail: %v", err)
+		return err
+	}
+	log.Logger.Debug("all etcd param:%v", etcdNetwork)
+
+	//获取所有网络的创建参数
+	etcdNetworkParams := make([]fsouza.CreateNetworkOptions, 0)
+
+	for _, v := range etcdNetwork {
+		var param fsouza.CreateNetworkOptions
+		err := json.Unmarshal([]byte(v), &param)
+		if err != nil {
+			log.Logger.Error("json unmarshal network param fail:%v", err)
 			return err
 		}
-		etcdNetwork = []string{}
+
+		etcdNetworkParams = append(etcdNetworkParams, param)
 	}
 
 	//比较daemonNetwork和etcdNetwork, 找到存在etcd但不存在于daemon中的macvlan网络,忽略存在于daemon但不存在于etcd的macvlan
-	//FIXME:这里最好做下网络信息匹配，单凭名字来匹配会出现问题的。
-	var inexistNetwork []string
-	for _, j := range etcdNetwork {
+	var inexistNetwork []fsouza.CreateNetworkOptions
+	//记录:详细网络信息
+	FullNetInfos := make([]fsouza.Network, 0)
+	for _, j := range etcdNetworkParams {
+		var isFound bool
+		var foundNetId string
 		for _, v := range daemonMaclvanNetwork {
 			//已存在
 			//TODO:1
-			log.Logger.Debug("%v vs %v", j, v.Name)
-			if v.Name == j {
-				break
+			log.Logger.Debug("%v vs %v", j.Name, v.Name)
+			//1.比较名字
+			if v.Name != j.Name {
+				goto Done
 			}
-			log.Logger.Debug("%v network doesn't exist in local daemon network", v.Name)
+			//2:比较macvlan option
+			for m, n := range j.Options {
+				if opt, exists := v.Options[m]; !exists || opt != n {
+					goto Done
+				}
+			}
+
+			//3.比较subnet和ipam驱动
+			if j.IPAM.Config[0].Subnet != v.IPAM.Config[0].Subnet || j.IPAM.Driver != v.IPAM.Driver {
+				goto Done
+			}
+			isFound = true
+			foundNetId = v.ID
+
+			goto Done
+		}
+	Done:
+		if !isFound {
+			log.Logger.Debug("%v network doesn't exist in local daemon network", j.Name)
 			inexistNetwork = append(inexistNetwork, j)
-			break
+		} else {
+			//提交已有的网络信息
+
+			//获取详细信息
+			fullNet, err := dockerClient.NetworkInfo(foundNetId)
+			if err != nil {
+				log.Logger.Error("unable to inspect network :%v", err)
+				//清理
+				continue
+			}
+			FullNetInfos = append(FullNetInfos, *fullNet)
 		}
 	}
 
 	//XXX:更好的处理失败
 	log.Logger.Debug("inexistNetwork : %v", inexistNetwork)
 	for _, j := range inexistNetwork {
-		var param fsouza.CreateNetworkOptions
-
-		//获取对应网络的macvlan网络创建参数
-		//TODO:后续采用一个名字映射的方式?不一定使用同样的macvlan网络名?
-		networkName := filepath.Base(j)
-		byteContent, err := etcdClient.GetNetworkParam(networkName)
-		if err != nil {
-			log.Logger.Error("unable to get network param:%v", err)
-			continue
-		}
-
-		err = json.Unmarshal(byteContent, &param)
-		if err != nil {
-			log.Logger.Error("unable to json unmarshal:%v", err)
-			continue
-		}
-
 		//创建缺失的网络
-		newNetwork, err := dockerClient.CreateNetwork(param)
+		newNetwork, err := dockerClient.CreateNetwork(j)
 		if err != nil {
 			log.Logger.Error("unable to create network :%v", err)
 			continue
 		}
-
 		//获取详细信息
 		fullNet, err := dockerClient.NetworkInfo(newNetwork.ID)
 		if err != nil {
@@ -132,29 +156,28 @@ func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, po
 			dockerClient.RemoveNetwork(fullNet.ID)
 			continue
 		}
+		FullNetInfos = append(FullNetInfos, *fullNet)
 
-		byteContent, err = json.Marshal(fullNet)
+	}
+
+	for _, v := range FullNetInfos {
+
+		byteContent, err := json.Marshal(v)
 		if err != nil {
 			log.Logger.Error("unable to marshal :%v", err)
 			//清理
-			dockerClient.RemoveNetwork(fullNet.ID)
+			dockerClient.RemoveNetwork(v.ID)
 			continue
 		}
 
 		//更新到etcd中
-		err = etcdClient.UpdateNetworkData(hostIP, j, byteContent)
+		err = etcdClient.CreateNetworkData(hostIP, v.Name, byteContent)
 		if err != nil {
 			log.Logger.Error("unable to update data to etcd :%v", err)
 			//清理
-			dockerClient.RemoveNetwork(fullNet.ID)
+			dockerClient.RemoveNetwork(v.ID)
 			continue
 		}
-
-		//更新到pool中
-		virnet := VirNetwork{*fullNet}
-		PoolManager.Lock()
-		pool.Networks[j] = virnet
-		PoolManager.Unlock()
 	}
 
 	return nil
@@ -203,7 +226,7 @@ func HandleEtcdNetworkEvent(eventChan <-chan etcd.EtcdNetworkEvent) {
 			}
 			log.Logger.Error("Marshal data:%v", byteContent2)
 
-			err = EtcdClient.UpdateNetworkData(HostIP, net.Name, byteContent2)
+			err = EtcdClient.CreateNetworkData(HostIP, net.Name, byteContent2)
 			if err != nil {
 				log.Logger.Error("unable to update etcd data", err)
 				//TODO:失败清理
@@ -293,9 +316,9 @@ func HandleDaemonNetworkEvent(eventChan <-chan daemon.DaemonNetworkEvent) {
 				log.Logger.Error("unable to json marshal:%v", err)
 				continue
 			}
-			log.Logger.Error("Marshal data:%v", byteContent2)
+			log.Logger.Debug("Marshal data:%v", string(byteContent2))
 
-			err = EtcdClient.UpdateNetworkData(HostIP, net.Name, byteContent2)
+			err = EtcdClient.CreateNetworkData(HostIP, net.Name, byteContent2)
 			if err != nil {
 				log.Logger.Error("unable to update etcd data", err)
 				//TODO:失败清理
@@ -341,7 +364,6 @@ func HandleDaemonNetworkEvent(eventChan <-chan daemon.DaemonNetworkEvent) {
 }
 
 func checkNetworkParamExists(network string) bool {
-	log.Logger.Debug("check network param exists")
 	_, err := EtcdClient.GetNetworkParam(network)
 	if err != nil {
 		e := err.(client.Error)
@@ -391,7 +413,7 @@ func HandleEtcdNetworkParamEvent(eventChan <-chan etcd.EtcdNetworkParamEvent) {
 				if err != nil {
 					log.Logger.Error("unable to unmarshal %v : %v ", paramByteContent, err)
 					//TODO: 这里要在etcd中添加一个network节点，其内容为空，表示有agent创建macvlan网络失败
-					EtcdClient.UpdateNetworkData(HostIP, filepath.Base(networkKey), []byte{})
+					EtcdClient.CreateNetworkData(HostIP, filepath.Base(networkKey), []byte{})
 					return
 				}
 
@@ -409,13 +431,9 @@ func HandleEtcdNetworkParamEvent(eventChan <-chan etcd.EtcdNetworkParamEvent) {
 					//appnet删除了网络参数
 					if !checkNetworkParamExists(networkName) {
 						log.Logger.Debug("param %v has been removed. skip creating stage", networkName)
-						err := DockerClient.RemoveNetwork(network.ID)
-						if err != nil {
-							log.Logger.Debug("remove network fail after recieve fail create notification: %v", err)
-						}
 						return
 					}
-					EtcdClient.UpdateNetworkData(HostIP, opt.Name, []byte{})
+					EtcdClient.CreateNetworkData(HostIP, opt.Name, []byte{})
 					return
 				}
 
@@ -439,7 +457,7 @@ func HandleEtcdNetworkParamEvent(eventChan <-chan etcd.EtcdNetworkParamEvent) {
 						log.Logger.Debug("param %v has been removed. skip creating stage,", networkName)
 						return
 					}
-					EtcdClient.UpdateNetworkData(HostIP, network.Name, []byte{})
+					EtcdClient.CreateNetworkData(HostIP, network.Name, []byte{})
 					return
 				}
 
@@ -464,7 +482,7 @@ func HandleEtcdNetworkParamEvent(eventChan <-chan etcd.EtcdNetworkParamEvent) {
 						log.Logger.Debug("param %v has been removed. skip creating stage", networkName)
 						return
 					}
-					EtcdClient.UpdateNetworkData(HostIP, network.Name, []byte{})
+					EtcdClient.CreateNetworkData(HostIP, network.Name, []byte{})
 					return
 				}
 
@@ -480,10 +498,10 @@ func HandleEtcdNetworkParamEvent(eventChan <-chan etcd.EtcdNetworkParamEvent) {
 				}
 
 				log.Logger.Debug("start to update network(%v) data", network.Name)
-				err = EtcdClient.UpdateNetworkData(HostIP, network.Name, byteContent)
+				err = EtcdClient.CreateNetworkData(HostIP, network.Name, byteContent)
 				if err != nil {
 					//TODO:网络清理...
-					log.Logger.Debug("update network data fail (%v:%v) : %v", HostIP, network.Name, err)
+					log.Logger.Error("update network data fail (%v:%v) : %v", HostIP, network.Name, err)
 					DockerClient.RemoveNetwork(network.ID)
 
 					//appnet删除了网络参数
@@ -492,7 +510,7 @@ func HandleEtcdNetworkParamEvent(eventChan <-chan etcd.EtcdNetworkParamEvent) {
 						return
 					}
 					//TODO: 这里要在etcd中添加一个network节点，其内容为空，表示有agent创建macvlan网络失败
-					EtcdClient.UpdateNetworkData(HostIP, network.Name, []byte{})
+					EtcdClient.CreateNetworkData(HostIP, network.Name, []byte{})
 					return
 				}
 

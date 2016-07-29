@@ -3,7 +3,6 @@ package etcd
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -129,18 +128,24 @@ func (c *EtcdClient) GetNetworkParam(network string) ([]byte, error) {
 
 //更改为获取所有macvlan网络名
 func (c *EtcdClient) GetNetworks() ([]string, error) {
-	key := networkDirNode
+	//	key := networkDirNode
+	key := paramDirNode
 	resp, err := c.Get(context.Background(), key, &client.GetOptions{Recursive: true})
 	if err != nil {
+		e := err.(client.Error)
+		if e.Code == client.ErrorCodeKeyNotFound {
+			return []string{}, nil
+		}
 		return []string{}, err
 	}
 
-	log.Logger.Debug("resp:%v", resp)
 	var macvlanNetworks []string
+	macvlanNetworks = make([]string, 0)
 
 	for _, j := range resp.Node.Nodes {
 		//需要的是网络名
-		macvlanNetworks = append(macvlanNetworks, filepath.Base(j.Key))
+		//	log.Logger.Debug("macvlan network in etcd :%v", j.Key)
+		macvlanNetworks = append(macvlanNetworks, j.Value)
 	}
 
 	return macvlanNetworks, nil
@@ -193,6 +198,19 @@ func (c *EtcdClient) RemoveNetworkData(ip, network string) error {
 }
 
 func (c *EtcdClient) UpdateNetworkData(ip, network string, data []byte) error {
+	key := networkDirNode + "/" + network + "/" + ip
+	log.Logger.Debug("updateNetworkData ip:%v,network:%v,data:%v,key:%v", ip, network, string(data), key)
+	//resp, err := c.Set(context.Background(), key, string(data), nil)
+	resp, err := c.Update(context.Background(), key, string(data))
+	if err != nil {
+		return err
+	}
+
+	log.Logger.Debug("resp:%v", resp)
+	return nil
+}
+
+func (c *EtcdClient) CreateNetworkData(ip, network string, data []byte) error {
 	key := networkDirNode + "/" + network + "/" + ip
 	log.Logger.Debug("updateNetworkData ip:%v,network:%v,data:%v,key:%v", ip, network, string(data), key)
 	resp, err := c.Set(context.Background(), key, string(data), nil)
