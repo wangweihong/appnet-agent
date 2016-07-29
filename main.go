@@ -1,5 +1,19 @@
 package main
 
+/*
+
+ agent程序在运行后，将会进行以下的操作:
+ 1.连接到etcd server中，将在/macvlan/nodes/目录节点下创建一个名为为当前agent IP的节点,
+ 该节点的TTL时长为5s, 每隔4s会进行一次更新操作。超时后，该节点将会丢失，视为当前agent断开连接.
+
+ 2.获取/macvlan/network/params目录下的所有节点，提取其中的网络创建参数，对比agent本地docker上的macvlan网络，创建不存在本地的macvlan网络
+   创建成功后将详细的网络信息保存在/macvlan/network/nodes/<network>/<agentIP>节点中
+
+ 3.监听本地docker daemon,如果记录到etcd中的网络被从命令行移除，则重新创建(?)
+	如果有执行添加/移除容器出网络时，更新详细的信息到/macvlan/network/nodes/<network>/<agentIP>
+
+*/
+
 import (
 	"appnet-agent/daemon"
 	"appnet-agent/etcd"
@@ -21,37 +35,6 @@ var (
 	PoolManager  *VirNetworkPool
 )
 
-//1.监听本地docker事件,监听网络的变化
-//2.根据etcd中macvlan节点的变更, 各主机节点进行macvlan网络的创建以及移除
-//3.
-
-//用户请求创建macvlan网络，appnet将macvlan信息记录到etcd中，agent主机一旦监听到该信息
-//便创建macvlan网络
-
-//谁来收集各appnet主机创建macvlan结果的信息?
-
-//怎么知道有多少台agent主机？如果agent主机死掉了,appnet怎么知道?
-
-//如果agent重启了，需要和etcd同步数据
-
-//依赖于etcd进行数据同步..
-
-//需要处理etcd的崩溃.
-
-//两个节点，一个用来记录所有的agent节点，另一个记录创建按网络的结果.
-// macvlan/nodes/ .. 区别所有的网络????所有通过ui创建macvlan网络具有同样的名字..
-// macvlan/<macvlan name>/
-
-//怎么创建macvlan创建网络的参数给agent?? ,创建节点时，赋值给key
-
-//怎么通知appnet?
-
-//预先写入某个节点，告知当前有多少台主机。 通过这个来对比.这里需要处理添加主机和删除主机，主机挂掉。
-
-//在已经存在新的网络的情况下，新增加的主机需要创建之前的macvlan网络吗？如果创建失败了，应当如何去处理?
-//删除指定的网络？还是告知有多少台主机加入了指定的网咯?
-//暂时解决方法,假设添加主机必定能能够成功创建macvlan网络，如果失败，添加一条日志。到时候该主机添加网络失败
-//再进行处理
 func syncPool(etcdClient *etcd.EtcdClient, dockerClient *daemon.DockerClient, pool *VirNetworkPool, hostIP string) error {
 	daemonNetwork, err := dockerClient.ListNetworks()
 	if err != nil {
