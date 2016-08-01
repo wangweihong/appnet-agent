@@ -25,7 +25,6 @@ var (
 	//保存着虚拟macvlan网络的信息，是各个主机节点上的真实macvlan网络的抽象
 	clusterNode = macvlanDirNode + "/cluster"
 
-	//ErrClusterUnavailable = errors.New("client: etcd cluster is unavailable or misconfigured")
 	ErrClusterUnavailable = client.ErrClusterUnavailable
 
 	RegisterNodeTTL = 5 * time.Second
@@ -49,8 +48,7 @@ func InitEtcdClient(endpoint string) *EtcdClient {
 	}
 
 	cfg := client.Config{
-		Endpoints:               []string{endpoint},
-		Transport:               client.DefaultTransport,
+		Endpoints: []string{endpoint}, Transport: client.DefaultTransport,
 		HeaderTimeoutPerRequest: 10 * time.Second,
 	}
 
@@ -231,8 +229,7 @@ func (c *EtcdClient) CreateNetworkData(ip, network string, data []byte) error {
 //问:etcd有没有机制检测多少时间内有更新节点?
 //答:通过设置节点的TTL,agent必须在指定时间内更新/重新创建节点,一旦超时，节点丢失。
 //可以认为该节点死亡.
-//怎么知道节点的expire time
-//resp中有剩余的时间
+//resp中有剩余的TTL时间
 func (e *EtcdClient) RegisterNode(ip string) error {
 	agentNode := agentDirNode + "/" + ip
 	_, err := e.Set(context.Background(), agentNode, ip, &client.SetOptions{TTL: RegisterNodeTTL})
