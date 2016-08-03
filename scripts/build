@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -e
+
+srcDir=$(dirname $(dirname $0))
+execFile=$srcDir/$(basename $srcDir)
+distDir=$GOPATH/src/dist
+cd $srcDir
+go build
+mkdir -p $distDir
+mv $execFile $distDir/
