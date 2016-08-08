@@ -20,6 +20,7 @@ import (
 	"appnet-agent/log"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -541,13 +542,25 @@ func main() {
 	//TODO:配置参数
 	//XXX:变更为全局?
 	var etcdEndpoint string
+	var logfile string
 
 	flag.StringVar(&etcdEndpoint, "endpoint", "192.168.4.11:2379", "ip of etcd server")
+	flag.StringVar(&logfile, "logfile", "/var/log/appnet/appnet-agent.log", "--logfile=/var/log/appnet/appnet-agent.log")
 	flag.Parse()
 
 	if len(etcdEndpoint) == 0 {
 		log.Logger.Error("etcd endpoint is invalid")
 		os.Exit(1)
+	}
+
+	err := log.SetLogger(logfile)
+	if err != nil {
+		fmt.Printf("init log handler fail for :%v\n", err.Error())
+		os.Exit(1)
+	}
+
+	if os.Getenv("APPNET_DEBUG") != "true" {
+		log.CloseDebug()
 	}
 
 	//HostIP = "192.168.4.11"
@@ -593,7 +606,7 @@ func main() {
 	PoolManager = InitPool()
 	//如果etcd中的数据和docker daemon不同步
 	//进行同步
-	err := syncPool(etcdClient, dockerClient, PoolManager, HostIP)
+	err = syncPool(etcdClient, dockerClient, PoolManager, HostIP)
 	if err != nil {
 		log.Logger.Error("sync pool fail:%v", err)
 		os.Exit(1)
