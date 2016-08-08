@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"appnet-agent/log"
-	"strings"
 
 	fsouza "github.com/fsouza/go-dockerclient"
 )
@@ -24,6 +23,15 @@ type DaemonNetworkEvent struct {
 	Endpoint string //只有动作为connect和disconnect时有效
 }
 
+type DaemonContainerEvent struct {
+	Action string
+	Id     string //
+}
+
+type DaemonContainer struct {
+	Id string `json:"id"`
+}
+
 func InitDockerClient(endpoint string) *DockerClient {
 	var err error
 	client, err := fsouza.NewClient(endpoint)
@@ -36,9 +44,11 @@ func InitDockerClient(endpoint string) *DockerClient {
 }
 
 //要相应的更新etcd中数据才行
-func DaemonListenNetwork() <-chan DaemonNetworkEvent {
-	daemonEventChan := make(chan DaemonNetworkEvent)
-	go func() {
+func DaemonListenNetwork() <-chan interface{} {
+	//daemonEventChan := make(chan DaemonNetworkEvent)
+	daemonEventChan := make(chan interface{})
+
+	go func(daemonEventChan chan interface{}) {
 		eventChan := make(chan *fsouza.APIEvents)
 		err := Client.AddEventListener(eventChan)
 		if err != nil {
@@ -49,7 +59,8 @@ func DaemonListenNetwork() <-chan DaemonNetworkEvent {
 			event := <-eventChan
 
 			//忽略非网络事件
-			if event.Type == "network" {
+			switch event.Type {
+			case "network":
 
 				//only concern about network type event
 				attrs := event.Actor.Attributes
@@ -80,9 +91,19 @@ func DaemonListenNetwork() <-chan DaemonNetworkEvent {
 					daemonEventChan <- networkEvent
 
 				}
+			case "container":
+				containerID := event.Actor.ID
+
+				containerEvent := DaemonContainerEvent{
+					Action: event.Action,
+					Id:     containerID,
+				}
+				daemonEventChan <- containerEvent
+
 			}
 		}
-	}()
+	}(daemonEventChan)
+
 	return daemonEventChan
 }
 
@@ -104,22 +125,41 @@ func NetworkRemove(id string) {
 	Client.RemoveNetwork(id)
 }
 
-//获得当前主机节点的IP地址
-func (c *DockerClient) GetNodeIP() string {
-	dockerInfo, err := c.Info()
+func (c *DockerClient) ConnectToNetwork(nid, cid string) error {
+	var opt fsouza.NetworkConnectionOptions
+	opt.Container = cid
+	err := c.ConnectNetwork(nid, opt)
 	if err != nil {
-		log.Logger.Error("unable to get docker info: %v", err)
-		return ""
+		log.Logger.Debug("ConnectNetwork [%v ===> %v]  fail for %v", cid, nid, err)
+	}
+	return err
+}
+
+func (c *DockerClient) DisconnectFromNetwork(nid, cid string) error {
+	var opt fsouza.NetworkConnectionOptions
+	opt.Container = cid
+	opt.Force = true
+	err := c.DisconnectNetwork(nid, opt)
+	if err != nil {
+		log.Logger.Debug("DisconnectNetwork [%v ===> %v]  fail for %v", cid, nid, err)
+	}
+	return err
+}
+
+//获取所有的所有的容器(id)
+func (c *DockerClient) GetAllContainers() ([]DaemonContainer, error) {
+	apiContainers, err := c.ListContainers(fsouza.ListContainersOptions{})
+	if err != nil {
+		return []DaemonContainer{}, err
 	}
 
-	advertise := dockerInfo.ClusterAdvertise
-	slice := strings.Split(advertise, ":")
-	if len(slice) != 2 {
-		log.Logger.Error("ClusterAdvertise info has change")
-		return ""
+	containers := make([]DaemonContainer, 0)
+	for _, v := range apiContainers {
+		var container DaemonContainer
+		container.Id = v.ID
+		containers = append(containers, container)
 	}
-
-	return slice[0]
+	return containers, nil
 }
 
 func init() {

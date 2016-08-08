@@ -25,6 +25,10 @@ var (
 	//保存着虚拟macvlan网络的信息，是各个主机节点上的真实macvlan网络的抽象
 	clusterNode = macvlanDirNode + "/cluster"
 
+	//维护agent节点和节点所有容器信息
+	appnetDirNode      = "/appnet"
+	agentContainerNode = appnetDirNode + "/containers"
+
 	ErrClusterUnavailable = client.ErrClusterUnavailable
 
 	RegisterNodeTTL = 5 * time.Second
@@ -216,6 +220,19 @@ func (c *EtcdClient) UpdateNetworkData(ip, network string, data []byte) error {
 func (c *EtcdClient) CreateNetworkData(ip, network string, data []byte) error {
 	key := networkDirNode + "/" + network + "/" + ip
 	log.Logger.Debug("updateNetworkData ip:%v,network:%v,data:%v,key:%v", ip, network, string(data), key)
+	resp, err := c.Set(context.Background(), key, string(data), nil)
+	if err != nil {
+		return err
+	}
+
+	log.Logger.Debug("resp:%v", resp)
+	return nil
+}
+
+func (c *EtcdClient) UpdateNodeContainerData(node string, data []byte) error {
+
+	key := agentContainerNode + "/node"
+	log.Logger.Debug("UpdateNodeContainerData key:%v, data:%v", node, data)
 	resp, err := c.Set(context.Background(), key, string(data), nil)
 	if err != nil {
 		return err
