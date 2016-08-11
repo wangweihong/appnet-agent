@@ -61,6 +61,7 @@ func DaemonListenNetwork() <-chan interface{} {
 			//忽略非网络事件
 			switch event.Type {
 			case "network":
+				log.Logger.Debug("watch docker occur nework event")
 
 				//only concern about network type event
 				attrs := event.Actor.Attributes
@@ -92,6 +93,7 @@ func DaemonListenNetwork() <-chan interface{} {
 
 				}
 			case "container":
+				log.Logger.Debug("watch docker occur container event:%v", event)
 				containerID := event.Actor.ID
 
 				containerEvent := DaemonContainerEvent{
@@ -148,6 +150,7 @@ func (c *DockerClient) DisconnectFromNetwork(nid, cid string) error {
 
 //获取所有的所有的容器(id)
 func (c *DockerClient) GetAllContainers() ([]DaemonContainer, error) {
+	c.ListNetworks()
 	apiContainers, err := c.ListContainers(fsouza.ListContainersOptions{})
 	if err != nil {
 		return []DaemonContainer{}, err

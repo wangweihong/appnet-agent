@@ -29,6 +29,13 @@ var (
 	appnetDirNode      = "/appnet"
 	agentContainerNode = appnetDirNode + "/containers"
 
+	//action由appnet设置, agent监听，其中可以为××/192.168.12.12.agent忽略非本机的节点
+	//节点值为一个{action:"connect/disconnect", containerid:"id", networkid:""}
+	//根据该值进行连接/断开操作
+	//结果保存在/result节点中，由appnet监听，移除结果节点以及action节点.
+	containerActionNode = appnetDirNode + "/container" + "/action"
+	containerResultNode = appnetDirNode + "/container" + "/result"
+
 	ErrClusterUnavailable = client.ErrClusterUnavailable
 
 	RegisterNodeTTL = 5 * time.Second
@@ -42,6 +49,10 @@ type EtcdNetworkParamEvent struct {
 	*client.Response
 }
 
+type EtcdNetworkContainerAction struct {
+	*client.Response
+}
+
 type EtcdClient struct {
 	client.KeysAPI
 }
@@ -52,8 +63,7 @@ func InitEtcdClient(endpoint string) *EtcdClient {
 	}
 
 	cfg := client.Config{
-		Endpoints: []string{endpoint}, Transport: client.DefaultTransport,
-		HeaderTimeoutPerRequest: 10 * time.Second,
+		Endpoints: []string{endpoint}, Transport: client.DefaultTransport, HeaderTimeoutPerRequest: 10 * time.Second,
 	}
 
 	c, err := client.New(cfg)
@@ -75,11 +85,11 @@ func (c *EtcdClient) EtcdListenNetwork() <-chan EtcdNetworkEvent {
 	watcher := c.Watcher(networkDirNode, &client.WatcherOptions{Recursive: true})
 
 	//异步监听
-	go func() {
+	go func(dests chan EtcdNetworkEvent) {
 		for {
 			res, err := watcher.Next(context.Background())
 			if err != nil {
-				log.Logger.Error("%v", err)
+				log.Logger.Debug("%v", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -92,7 +102,7 @@ func (c *EtcdClient) EtcdListenNetwork() <-chan EtcdNetworkEvent {
 				dests <- response
 			}
 		}
-	}()
+	}(dests)
 
 	return dests
 }
@@ -102,11 +112,11 @@ func (c *EtcdClient) EtcdListenNetworkParam() <-chan EtcdNetworkParamEvent {
 	watcher := c.Watcher(paramDirNode, &client.WatcherOptions{Recursive: true})
 
 	//异步监听
-	go func() {
+	go func(dests chan EtcdNetworkParamEvent) {
 		for {
 			res, err := watcher.Next(context.Background())
 			if err != nil {
-				log.Logger.Error("%v", err)
+				log.Logger.Debug("%v", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -119,8 +129,27 @@ func (c *EtcdClient) EtcdListenNetworkParam() <-chan EtcdNetworkParamEvent {
 				dests <- response
 			}
 		}
-	}()
+	}(dests)
+	return dests
+}
 
+func (c *EtcdClient) EtcdListenNetworkContainerEvent() <-chan EtcdNetworkContainerAction {
+	dests := make(chan EtcdNetworkContainerAction)
+	watcher := c.Watcher(containerActionNode, &client.WatcherOptions{Recursive: true})
+
+	go func(dests chan EtcdNetworkContainerAction) {
+		for {
+			res, err := watcher.Next(context.Background())
+			if err != nil {
+				log.Logger.Debug("listen netwrok container action fail:%v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			log.Logger.Debug("resp:%v", res)
+			response := EtcdNetworkContainerAction{res}
+			dests <- response
+		}
+	}(dests)
 	return dests
 }
 
@@ -231,14 +260,29 @@ func (c *EtcdClient) CreateNetworkData(ip, network string, data []byte) error {
 
 func (c *EtcdClient) UpdateNodeContainerData(node string, data []byte) error {
 
-	key := agentContainerNode + "/node"
-	log.Logger.Debug("UpdateNodeContainerData key:%v, data:%v", node, data)
-	resp, err := c.Set(context.Background(), key, string(data), nil)
+	key := agentContainerNode + "/" + node
+	log.Logger.Debug("UpdateNodeContainerData key:%v, data:%v", node, string(data))
+	_, err := c.Set(context.Background(), key, string(data), nil)
 	if err != nil {
+		log.Logger.Debug("UpdateNodeContainerData fail for :%v", err)
 		return err
 	}
 
-	log.Logger.Debug("resp:%v", resp)
+	return nil
+}
+
+//空表示成功，否则为失败
+func (c *EtcdClient) UpdateNetworkContainerResult(node string, data []byte) error {
+	key := containerResultNode + "/" + node
+
+	log.Logger.Debug("UpdateNetworkContainerResult key:%v,data:%v", key, string(data))
+
+	//设置TTL,自动删除结果节点.
+	_, err := c.Set(context.Background(), key, string(data), &client.SetOptions{TTL: 5 * time.Second})
+	if err != nil {
+		log.Logger.Debug("UpdateNetworkContainerResult fail for :%v", err)
+		return err
+	}
 	return nil
 }
 
