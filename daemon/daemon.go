@@ -7,9 +7,7 @@ import (
 )
 
 var (
-	Client *DockerClient
-
-	//Channel用来接收etcd传递过来的事件?
+	client *DockerClient
 )
 
 type DockerClient struct {
@@ -44,13 +42,13 @@ func InitDockerClient(endpoint string) *DockerClient {
 }
 
 //要相应的更新etcd中数据才行
-func DaemonListenNetwork() <-chan interface{} {
+func DaemonListenLocalEvent() <-chan interface{} {
 	//daemonEventChan := make(chan DaemonNetworkEvent)
 	daemonEventChan := make(chan interface{})
 
 	go func(daemonEventChan chan interface{}) {
 		eventChan := make(chan *fsouza.APIEvents)
-		err := Client.AddEventListener(eventChan)
+		err := client.AddEventListener(eventChan)
 		if err != nil {
 			log.Logger.Error("fail to add listener")
 			return
@@ -110,48 +108,70 @@ func DaemonListenNetwork() <-chan interface{} {
 }
 
 //创建docker network
-//怎么返回结果？同步到etcd?
-//关键是返回失败的结果.
-func NetworkCreate(opt fsouza.CreateNetworkOptions) error {
-	network, err := Client.CreateNetwork(opt)
+func CreateNetwork(opt fsouza.CreateNetworkOptions) (*fsouza.Network, error) {
+	network, err := client.CreateNetwork(opt)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	log.Logger.Debug("%v", network)
+	log.Logger.Debug("create %v", network)
+	return network, nil
+}
+
+func InfoNetwork(NetworkId string) (*fsouza.Network, error) {
+	network, err := client.NetworkInfo(NetworkId)
+	if err != nil {
+		log.Logger.Debug("info network fail :%v", err)
+		return nil, err
+	}
+	return network, nil
+}
+
+//移除网络
+func RemoveNetwork(id string) error {
+	//检查关联的容器数量
+	err := client.RemoveNetwork(id)
+	if err != nil {
+		log.Logger.Debug("remove %v fail:%v", id, err)
+		return err
+	}
 	return nil
 }
 
-func NetworkRemove(id string) {
-	//检查关联的容器数量
-	Client.RemoveNetwork(id)
-}
-
-func (c *DockerClient) ConnectToNetwork(nid, cid string) error {
+func ConnectToNetwork(nid, cid string) error {
 	var opt fsouza.NetworkConnectionOptions
 	opt.Container = cid
-	err := c.ConnectNetwork(nid, opt)
+	err := client.ConnectNetwork(nid, opt)
 	if err != nil {
 		log.Logger.Debug("ConnectNetwork [%v ===> %v]  fail for %v", cid, nid, err)
 	}
 	return err
 }
 
-func (c *DockerClient) DisconnectFromNetwork(nid, cid string) error {
+func DisconnectFromNetwork(nid, cid string) error {
 	var opt fsouza.NetworkConnectionOptions
 	opt.Container = cid
 	opt.Force = true
-	err := c.DisconnectNetwork(nid, opt)
+	err := client.DisconnectNetwork(nid, opt)
 	if err != nil {
 		log.Logger.Debug("DisconnectNetwork [%v ===> %v]  fail for %v", cid, nid, err)
 	}
 	return err
 }
 
+func ListNetworks() ([]fsouza.Network, error) {
+	networks, err := client.ListNetworks()
+	if err != nil {
+		log.Logger.Debug("ListNetworks fail for %v\n", err)
+		return nil, err
+	}
+	return networks, nil
+
+}
+
 //获取所有的所有的容器(id)
-func (c *DockerClient) GetAllContainers() ([]DaemonContainer, error) {
-	c.ListNetworks()
-	apiContainers, err := c.ListContainers(fsouza.ListContainersOptions{})
+func GetAllContainers() ([]DaemonContainer, error) {
+	apiContainers, err := client.ListContainers(fsouza.ListContainersOptions{})
 	if err != nil {
 		return []DaemonContainer{}, err
 	}
@@ -168,7 +188,7 @@ func (c *DockerClient) GetAllContainers() ([]DaemonContainer, error) {
 func init() {
 	endpoint := "unix:///var/run/docker.sock"
 	var err error
-	Client = InitDockerClient(endpoint)
+	client = InitDockerClient(endpoint)
 	if err != nil {
 		panic("Create docker client fail")
 	}
