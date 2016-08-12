@@ -2,7 +2,6 @@ package etcd
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -14,16 +13,16 @@ import (
 )
 
 var (
-	macvlanDirNode = "/macvlan"
+	MacvlanDirNode = "/macvlan"
 	//保存所有主机节点IP
-	agentDirNode = macvlanDirNode + "/nodes/"
+	agentDirNode = MacvlanDirNode + "/nodes/"
 	//保持着所有虚拟网络中对应的真实macvlan的详细信息
 	//如/macvlan/network/nodes/test123/192.168.14.1 表示的是test123这个macvlan虚拟网络在192.168.14.1主机节点的信息
-	networkDirNode = macvlanDirNode + "/network/nodes"
-	//保存所有macvlan网络的创建参数，一旦移除，意味着移除网络
-	paramDirNode = macvlanDirNode + "/network/params"
+	networkDirNode = MacvlanDirNode + "/network/nodes"
+	//保存所有macvlan网络的创建参数，一旦移除，意味着移除网络 paramDirNode = macvlanDirNode + "/network/params"
+	paramDirNode = MacvlanDirNode + "/network/params"
 	//保存着虚拟macvlan网络的信息，是各个主机节点上的真实macvlan网络的抽象
-	clusterNode = macvlanDirNode + "/cluster"
+	clusterNode = MacvlanDirNode + "/cluster"
 
 	//维护agent节点和节点所有容器信息
 	appnetDirNode      = "/appnet"
@@ -39,6 +38,9 @@ var (
 	ErrClusterUnavailable = client.ErrClusterUnavailable
 
 	RegisterNodeTTL = 5 * time.Second
+
+	ResultTTL  = 5 * time.Second
+	etcdClient *EtcdClient
 )
 
 type EtcdNetworkEvent struct {
@@ -57,7 +59,7 @@ type EtcdClient struct {
 	client.KeysAPI
 }
 
-func InitEtcdClient(endpoint string) *EtcdClient {
+func InitEtcdClient(endpoint string) error {
 	if !strings.HasPrefix(endpoint, "http://") {
 		endpoint = "http://" + endpoint
 	}
@@ -69,20 +71,21 @@ func InitEtcdClient(endpoint string) *EtcdClient {
 	c, err := client.New(cfg)
 	if err != nil {
 		log.Logger.Debug("%v", err)
-		return nil
+		return err
 	}
 	kapi := client.NewKeysAPI(c)
 
-	etcdClient := EtcdClient{
+	etcdClient = &EtcdClient{
 		kapi,
 	}
-	return &etcdClient
+	return nil
 }
 
 //TODO:需要返回一个只包含网络/容器信息的结构体
-func (c *EtcdClient) EtcdListenNetwork() <-chan EtcdNetworkEvent {
+func ListenNetwork() <-chan EtcdNetworkEvent {
+	key := networkDirNode
 	dests := make(chan EtcdNetworkEvent)
-	watcher := c.Watcher(networkDirNode, &client.WatcherOptions{Recursive: true})
+	watcher := etcdClient.Watcher(key, &client.WatcherOptions{Recursive: true})
 
 	//异步监听
 	go func(dests chan EtcdNetworkEvent) {
@@ -107,9 +110,10 @@ func (c *EtcdClient) EtcdListenNetwork() <-chan EtcdNetworkEvent {
 	return dests
 }
 
-func (c *EtcdClient) EtcdListenNetworkParam() <-chan EtcdNetworkParamEvent {
+func ListenNetworkParam() <-chan EtcdNetworkParamEvent {
+	key := paramDirNode
 	dests := make(chan EtcdNetworkParamEvent)
-	watcher := c.Watcher(paramDirNode, &client.WatcherOptions{Recursive: true})
+	watcher := etcdClient.Watcher(key, &client.WatcherOptions{Recursive: true})
 
 	//异步监听
 	go func(dests chan EtcdNetworkParamEvent) {
@@ -133,9 +137,10 @@ func (c *EtcdClient) EtcdListenNetworkParam() <-chan EtcdNetworkParamEvent {
 	return dests
 }
 
-func (c *EtcdClient) EtcdListenNetworkContainerEvent() <-chan EtcdNetworkContainerAction {
+func ListenNetworkContainerEvent() <-chan EtcdNetworkContainerAction {
+	key := containerActionNode
 	dests := make(chan EtcdNetworkContainerAction)
-	watcher := c.Watcher(containerActionNode, &client.WatcherOptions{Recursive: true})
+	watcher := etcdClient.Watcher(key, &client.WatcherOptions{Recursive: true})
 
 	go func(dests chan EtcdNetworkContainerAction) {
 		for {
@@ -153,30 +158,38 @@ func (c *EtcdClient) EtcdListenNetworkContainerEvent() <-chan EtcdNetworkContain
 	return dests
 }
 
-func (c *EtcdClient) GetNetworkParam(network string) ([]byte, error) {
+func GetNetworkParam(network string) (*fsouza.CreateNetworkOptions, error) {
 	key := paramDirNode + "/" + network
-	resp, err := c.Get(context.Background(), key, nil)
+	resp, err := etcdClient.etcdGet(key, nil)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 
-	return []byte(resp.Node.Value), nil
+	var param fsouza.CreateNetworkOptions
+	err = json.Unmarshal([]byte(resp.Node.Value), &param)
+	if err != nil {
+		log.Logger.Error("unable to unmarshal (%v): %v", resp.Node.Value, err)
+		return nil, err
+	}
+	return &param, nil
 }
 
 //更改为获取所有macvlan网络创建信息
-func (c *EtcdClient) GetAllNetworkCreateParams() ([]string, error) {
+//func (c *EtcdClient) GetAllNetworkCreateParams() ([]string, error) {
+func GetAllNetworkCreateParams() ([]fsouza.CreateNetworkOptions, error) {
 	//	key := networkDirNode
 	key := paramDirNode
-	resp, err := c.Get(context.Background(), key, &client.GetOptions{Recursive: true})
+	resp, err := etcdClient.etcdGet(key, &client.GetOptions{Recursive: true})
 	if err != nil {
 		e := err.(client.Error)
 		if e.Code == client.ErrorCodeKeyNotFound {
-			return []string{}, nil
+			return nil, nil
 		}
-		return []string{}, err
+		return nil, err
 	}
 
 	var macvlanNetworks []string
+	etcdNetworkParams := make([]fsouza.CreateNetworkOptions, 0)
 	macvlanNetworks = make([]string, 0)
 
 	for _, j := range resp.Node.Nodes {
@@ -185,17 +198,25 @@ func (c *EtcdClient) GetAllNetworkCreateParams() ([]string, error) {
 		macvlanNetworks = append(macvlanNetworks, j.Value)
 	}
 
-	return macvlanNetworks, nil
+	for _, v := range macvlanNetworks {
+		var param fsouza.CreateNetworkOptions
+		err := json.Unmarshal([]byte(v), &param)
+		if err != nil {
+			log.Logger.Error("json unmarshal network param fail:%v", err)
+			return nil, err
+		}
+
+		etcdNetworkParams = append(etcdNetworkParams, param)
+	}
+
+	return etcdNetworkParams, nil
 }
 
 //获取指定主机节点的指定macvlan的详细信息
-func (c *EtcdClient) InfoNetwork(ip, network string) (*fsouza.Network, error) {
-	if len(ip) == 0 || len(network) == 0 {
-		log.Logger.Error("ip or network is empty")
-		return nil, fmt.Errorf("ip or network is empty")
-	}
+func InfoNetwork(ip, network string) (*fsouza.Network, error) {
 	key := networkDirNode + "/" + network + "/" + ip
-	resp, err := c.Get(context.Background(), key, &client.GetOptions{Recursive: true})
+	log.Logger.Debug("key:%v", key)
+	resp, err := etcdClient.etcdGet(key, &client.GetOptions{Recursive: true})
 	if err != nil {
 		//有可能该agent并没有成功创建macvlan网络，因此并没有对应的key存在。
 		e := err.(client.Error)
@@ -221,11 +242,11 @@ func (c *EtcdClient) InfoNetwork(ip, network string) (*fsouza.Network, error) {
 	return &netinfo, nil
 }
 
-func (c *EtcdClient) RemoveNetworkData(ip, network string) error {
+func RemoveNetworkData(ip, network string) error {
 	key := networkDirNode + "/" + network + "/" + ip
 	log.Logger.Debug("RemoveNetworkData ip:%v,network:%v,key:%v", ip, network, key)
 
-	_, err := c.Delete(context.Background(), key, &client.DeleteOptions{})
+	_, err := etcdClient.etcdDelete(key, &client.DeleteOptions{})
 	//FIXME:怎么处理
 	if err != nil {
 		log.Logger.Error("unable to remove macvlan key %v : %v", key, err)
@@ -234,51 +255,46 @@ func (c *EtcdClient) RemoveNetworkData(ip, network string) error {
 	return nil
 }
 
-func (c *EtcdClient) UpdateNetworkData(ip, network string, data []byte) error {
+func UpdateNetworkData(ip, network string, data string) error {
 	key := networkDirNode + "/" + network + "/" + ip
-	log.Logger.Debug("updateNetworkData ip:%v,network:%v,data:%v,key:%v", ip, network, string(data), key)
-	resp, err := c.Update(context.Background(), key, string(data))
+	log.Logger.Debug("updateNetworkData")
+	_, err := etcdClient.etcdUpdate(key, data)
 	if err != nil {
 		return err
 	}
 
-	log.Logger.Debug("resp:%v", resp)
 	return nil
 }
 
-func (c *EtcdClient) CreateNetworkData(ip, network string, data []byte) error {
+func CreateNetworkData(ip, network string, data string) error {
 	key := networkDirNode + "/" + network + "/" + ip
-	log.Logger.Debug("updateNetworkData ip:%v,network:%v,data:%v,key:%v", ip, network, string(data), key)
-	resp, err := c.Set(context.Background(), key, string(data), nil)
+	log.Logger.Debug("createNetworkData")
+	_, err := etcdClient.etcdSet(key, data, nil)
 	if err != nil {
 		return err
 	}
 
-	log.Logger.Debug("resp:%v", resp)
 	return nil
 }
 
-func (c *EtcdClient) UpdateNodeContainerData(node string, data []byte) error {
+func UpdateNodeContainerData(node string, data string) error {
 
 	key := agentContainerNode + "/" + node
-	log.Logger.Debug("UpdateNodeContainerData key:%v, data:%v", node, string(data))
-	_, err := c.Set(context.Background(), key, string(data), nil)
+	log.Logger.Debug("UpdateNodeContainerData key:%v, data:%v", node, data)
+	_, err := etcdClient.etcdSet(key, data, nil)
 	if err != nil {
 		log.Logger.Debug("UpdateNodeContainerData fail for :%v", err)
 		return err
 	}
-
 	return nil
 }
 
 //空表示成功，否则为失败
-func (c *EtcdClient) UpdateNetworkContainerResult(node string, data []byte) error {
+func UpdateNetworkContainerResult(node string, data string) error {
 	key := containerResultNode + "/" + node
 
-	log.Logger.Debug("UpdateNetworkContainerResult key:%v,data:%v", key, string(data))
-
 	//设置TTL,自动删除结果节点.
-	_, err := c.Set(context.Background(), key, string(data), &client.SetOptions{TTL: 5 * time.Second})
+	_, err := etcdClient.etcdSet(key, data, &client.SetOptions{TTL: ResultTTL})
 	if err != nil {
 		log.Logger.Debug("UpdateNetworkContainerResult fail for :%v", err)
 		return err
@@ -288,17 +304,49 @@ func (c *EtcdClient) UpdateNetworkContainerResult(node string, data []byte) erro
 
 //agent主机将自己的ip注册到etcd中
 //问:etcd有没有机制检测多少时间内有更新节点?
-//答:通过设置节点的TTL,agent必须在指定时间内更新/重新创建节点,一旦超时，节点丢失。
-//可以认为该节点死亡.
+//答:通过设置节点的TTL,agent必须在指定时间内更新/重新创建节点,一旦超时，节点丢失。 //可以认为该节点死亡.
 //resp中有剩余的TTL时间
-func (e *EtcdClient) RegisterNode(ip string) error {
-	agentNode := agentDirNode + "/" + ip
-	_, err := e.Set(context.Background(), agentNode, ip, &client.SetOptions{TTL: RegisterNodeTTL})
-	//	resp, err := e.Set(context.Background(), agentNode, ip, &client.SetOptions{TTL: RegisterNodeTTL})
+func RegisterNode(ip string) error {
+	key := agentDirNode + "/" + ip
+	_, err := etcdClient.etcdSet(key, ip, nil)
 	if err != nil {
-		log.Logger.Error("register node fail:%v", err)
+		log.Logger.Debug("Register Node fail for :%v", err)
 		return err
 	}
-	//	log.Logger.Debug("resp:%v", resp)
 	return nil
+}
+
+func (e *EtcdClient) etcdSet(key string, content string, opt *client.SetOptions) (*client.Response, error) {
+	log.Logger.Debug("set :key:%v,content:%v,option:%v", key, content, opt)
+
+	resp, err := e.Set(context.Background(), key, content, opt)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (e *EtcdClient) etcdUpdate(key string, content string) (*client.Response, error) {
+	resp, err := e.Update(context.Background(), key, content)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (e *EtcdClient) etcdGet(key string, opt *client.GetOptions) (*client.Response, error) {
+	resp, err := e.Get(context.Background(), key, opt)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (e *EtcdClient) etcdDelete(key string, opt *client.DeleteOptions) (*client.Response, error) {
+	resp, err := e.Delete(context.Background(), key, opt)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+
 }
