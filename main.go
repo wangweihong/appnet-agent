@@ -530,6 +530,7 @@ type NetworkContainerAction struct {
 	Action      string `json:"action"` //connect disconnect
 	ContainerID string `json:"containerid"`
 	NetworkID   string `json:"networkid"`
+	IP          string `json:"ip"`
 }
 
 func HandleEtcdNetworkContainerEvent(eventChan <-chan etcd.EtcdNetworkContainerAction) {
@@ -561,7 +562,7 @@ func HandleEtcdNetworkContainerEvent(eventChan <-chan etcd.EtcdNetworkContainerA
 			}
 
 			if action.Action == "connect" {
-				err := daemon.ConnectToNetwork(action.NetworkID, action.ContainerID)
+				err := daemon.ConnectToNetwork(action.NetworkID, action.ContainerID, action.IP)
 				if err != nil {
 					tmp := fmt.Sprintf("%v:connect to Network fail:%v", HostIP, err)
 					log.Logger.Error(tmp)

@@ -143,9 +143,18 @@ func RemoveNetwork(id string) error {
 	return nil
 }
 
-func ConnectToNetwork(nid, cid string) error {
+func ConnectToNetwork(nid, cid, ip string) error {
 	var opt fsouza.NetworkConnectionOptions
 	opt.Container = cid
+
+	if len(ip) != 0 {
+		config := new(fsouza.EndpointConfig)
+		config.IPAMConfig = new(fsouza.EndpointIPAMConfig)
+		config.IPAMConfig.IPv4Address = ip
+		opt.EndpointConfig = config
+		log.Logger.Debug("connectNetowrk:ip:%v", ip)
+	}
+
 	err := client.ConnectNetwork(nid, opt)
 	if err != nil {
 		log.Logger.Debug("ConnectNetwork [%v ===> %v]  fail for %v", cid, nid, err)

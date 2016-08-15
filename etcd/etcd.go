@@ -39,7 +39,7 @@ var (
 
 	RegisterNodeTTL = 5 * time.Second
 
-	ResultTTL  = 5 * time.Second
+	ResultTTL  = 20 * time.Second
 	etcdClient *EtcdClient
 )
 
@@ -294,6 +294,7 @@ func UpdateNodeContainerData(node string, data string) error {
 //空表示成功，否则为失败
 func UpdateNetworkContainerResult(node string, data string) error {
 	key := containerResultNode + "/" + node
+	log.Logger.Debug("update network container result:%v", data)
 
 	//设置TTL,自动删除结果节点.
 	_, err := etcdClient.etcdSet(key, data, &client.SetOptions{TTL: ResultTTL})
