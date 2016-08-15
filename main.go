@@ -632,7 +632,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err := etcd.InitEtcdClient(etcdEndpoint)
+	err = etcd.InitEtcdClient(etcdEndpoint)
 	if err != nil {
 		log.Logger.Error("init etcd fail")
 		os.Exit(1)
