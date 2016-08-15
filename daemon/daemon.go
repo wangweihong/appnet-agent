@@ -56,6 +56,11 @@ func DaemonListenLocalEvent() <-chan interface{} {
 		for {
 			event := <-eventChan
 
+			if event == nil {
+				log.Logger.Error("recieve an nil event ?")
+				continue
+			}
+
 			//忽略非网络事件
 			switch event.Type {
 			case "network":

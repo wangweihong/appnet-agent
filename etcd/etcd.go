@@ -65,7 +65,9 @@ func InitEtcdClient(endpoint string) error {
 	}
 
 	cfg := client.Config{
-		Endpoints: []string{endpoint}, Transport: client.DefaultTransport, HeaderTimeoutPerRequest: 10 * time.Second,
+		Endpoints:               []string{endpoint},
+		Transport:               client.DefaultTransport,
+		HeaderTimeoutPerRequest: 10 * time.Second,
 	}
 
 	c, err := client.New(cfg)
@@ -317,7 +319,7 @@ func RegisterNode(ip string) error {
 }
 
 func (e *EtcdClient) etcdSet(key string, content string, opt *client.SetOptions) (*client.Response, error) {
-	log.Logger.Debug("set :key:%v,content:%v,option:%v", key, content, opt)
+	//	log.Logger.Debug("set :key:%v,content:%v,option:%v", key, content, opt)
 
 	resp, err := e.Set(context.Background(), key, content, opt)
 	if err != nil {
