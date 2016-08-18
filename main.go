@@ -218,6 +218,30 @@ func HandleDaemonNetworkEvent(eventChan <-chan interface{}) {
 
 			//忽略非macvlan网络.
 			//TODO:添加overlay网络的处理
+
+			if event.Type == "overlay" {
+				log.Logger.Debug("recieve an overlay network event:%v", event)
+				switch event.Action {
+				//有容器连接到新的网络
+				case "connect", "disconnect":
+					network, err := daemon.InfoNetwork(event.Network)
+					if err != nil {
+						log.Logger.Error("daemon info network fail for %v", err)
+					}
+
+					byteContent, err := json.Marshal(network.Containers)
+					if err != nil {
+						log.Logger.Error("marshal containers fail for %v", err)
+						continue
+					}
+					err = etcd.UpdateOverlayNodeContainerData(HostIP, network.ID, string(byteContent))
+					if err != nil {
+						log.Logger.Debug("Update Network Data fail for %v", err)
+						continue
+					}
+				}
+			}
+
 			if event.Type != "macvlan" {
 				continue
 			}

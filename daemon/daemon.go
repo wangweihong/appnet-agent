@@ -71,7 +71,7 @@ func DaemonListenLocalEvent() <-chan interface{} {
 				network, _ := attrs["name"]
 				netType, _ := attrs["type"]
 
-				if netType == "macvlan" {
+				if netType == "macvlan" || netType == "overlay" {
 
 					log.Logger.Debug("Action:%v", event.Action)
 					log.Logger.Debug("Type:%v", event.Type)

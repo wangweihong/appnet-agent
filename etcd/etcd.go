@@ -28,6 +28,8 @@ var (
 	appnetDirNode      = "/appnet"
 	agentContainerNode = appnetDirNode + "/containers"
 
+	agentOverlayContainerNode = appnetDirNode + "/overlaycontainers"
+
 	//action由appnet设置, agent监听，其中可以为××/192.168.12.12.agent忽略非本机的节点
 	//节点值为一个{action:"connect/disconnect", containerid:"id", networkid:""}
 	//根据该值进行连接/断开操作
@@ -300,6 +302,18 @@ func UpdateNetworkContainerResult(node string, data string) error {
 	_, err := etcdClient.etcdSet(key, data, &client.SetOptions{TTL: ResultTTL})
 	if err != nil {
 		log.Logger.Debug("UpdateNetworkContainerResult fail for :%v", err)
+		return err
+	}
+	return nil
+}
+
+func UpdateOverlayNodeContainerData(node string, network string, data string) error {
+
+	key := agentOverlayContainerNode + "/" + node + "/" + network
+	log.Logger.Debug("UpdateNodeContainerData key:%v, data:%v", node, data)
+	_, err := etcdClient.etcdSet(key, data, nil)
+	if err != nil {
+		log.Logger.Debug("UpdateNodeContainerData fail for :%v", err)
 		return err
 	}
 	return nil
