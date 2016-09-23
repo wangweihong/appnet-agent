@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/coreos/etcd/client"
@@ -639,6 +640,12 @@ func main() {
 	if len(etcdEndpoint) == 0 {
 		log.Logger.Error("etcd endpoint is invalid")
 		os.Exit(1)
+	}
+
+	deadchan := make(chan int)
+	if strings.HasPrefix(etcdEndpoint, "0.0.0.0") {
+		fmt.Println("suicide")
+		deadchan <- 1
 	}
 
 	err := log.SetLogger(logfile)
