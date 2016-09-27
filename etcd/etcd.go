@@ -35,6 +35,7 @@ var (
 	//根据该值进行连接/断开操作
 	//结果保存在/result节点中，由appnet监听，移除结果节点以及action节点.
 	containerActionNode = appnetDirNode + "/container" + "/action"
+	//返回一个结构体，其中包含创建的网络信息,错误信息构建的结构体
 	containerResultNode = appnetDirNode + "/container" + "/result"
 
 	ErrClusterUnavailable = client.ErrClusterUnavailable
@@ -217,7 +218,7 @@ func GetAllNetworkCreateParams() ([]fsouza.CreateNetworkOptions, error) {
 }
 
 //获取指定主机节点的指定macvlan的详细信息
-func InfoNetwork(ip, network string) (*fsouza.Network, error) {
+func InfoNetwork(ip, network string) (string, error) {
 	key := networkDirNode + "/" + network + "/" + ip
 	log.Logger.Debug("key:%v", key)
 	resp, err := etcdClient.etcdGet(key, &client.GetOptions{Recursive: true})
@@ -225,25 +226,28 @@ func InfoNetwork(ip, network string) (*fsouza.Network, error) {
 		//有可能该agent并没有成功创建macvlan网络，因此并没有对应的key存在。
 		e := err.(client.Error)
 		if e.Code == client.ErrorCodeKeyNotFound {
-			return nil, nil
+			return "", nil
 		}
-		return nil, err
+		return "", err
 	}
 	if len(resp.Node.Value) == 0 {
-		return nil, nil
+		return "", nil
 	}
 
-	log.Logger.Debug("resp:%v", resp)
+	log.Logger.Debug("resp value:%v", resp.Node.Value)
+	return resp.Node.Value, nil
 
-	var netinfo fsouza.Network
-	err = json.Unmarshal([]byte(resp.Node.Value), &netinfo)
-	if err != nil {
-		log.Logger.Debug("unable to unmarshal json : %v ", err)
-		return nil, err
-	}
+	/*
+		var netinfo fsouza.Network
+		err = json.Unmarshal([]byte(resp.Node.Value), &netinfo)
+		if err != nil {
+			log.Logger.Debug("unable to unmarshal json : %v ", err)
+			return nil, err
+		}
 
-	//需要考虑转换成何种类型的数据
-	return &netinfo, nil
+		//需要考虑转换成何种类型的数据
+		return &netinfo, nil
+	*/
 }
 
 func RemoveNetworkData(ip, network string) error {
@@ -272,7 +276,7 @@ func UpdateNetworkData(ip, network string, data string) error {
 
 func CreateNetworkData(ip, network string, data string) error {
 	key := networkDirNode + "/" + network + "/" + ip
-	log.Logger.Debug("createNetworkData")
+	log.Logger.Debug("createNetworkData key:%v, data:%v", key, data)
 	_, err := etcdClient.etcdSet(key, data, nil)
 	if err != nil {
 		return err
@@ -334,7 +338,7 @@ func RegisterNode(ip string) error {
 }
 
 func (e *EtcdClient) etcdSet(key string, content string, opt *client.SetOptions) (*client.Response, error) {
-	//	log.Logger.Debug("set :key:%v,content:%v,option:%v", key, content, opt)
+	log.Logger.Debug("set :key:%v,content:%v,option:%v", key, content, opt)
 
 	resp, err := e.Set(context.Background(), key, content, opt)
 	if err != nil {
