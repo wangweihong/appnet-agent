@@ -260,11 +260,16 @@ func HandleDaemonNetworkEvent(eventChan <-chan interface{}) {
 						continue
 					}
 
-					byteContent2, err := json.Marshal(fullnet)
-					if err != nil {
-						log.Logger.Error("unable to json marshal:%v", err)
-						continue
-					}
+					var ret NetworkOperateResult
+					ret.Network = *fullnet
+					byteContent2 := ret.Marshal()
+					/*
+						byteContent2, err := json.Marshal(fullnet)
+						if err != nil {
+							log.Logger.Error("unable to json marshal:%v", err)
+							continue
+						}
+					*/
 					log.Logger.Debug("Marshal data:%v", string(byteContent2))
 
 					err = etcd.CreateNetworkData(HostIP, net.Name, string(byteContent2))
@@ -282,12 +287,18 @@ func HandleDaemonNetworkEvent(eventChan <-chan interface{}) {
 						log.Logger.Error("unable to inspect network: %v", err)
 						continue
 					}
+					/*
+						byteContent, err := json.Marshal(net)
+						if err != nil {
+							log.Logger.Error("unable to json marshal:%v", err)
+							continue
+						}
+						log.Logger.Debug("Marshal data:%v", string(byteContent))
 
-					byteContent, err := json.Marshal(net)
-					if err != nil {
-						log.Logger.Error("unable to json marshal:%v", err)
-						continue
-					}
+					*/
+					var ret NetworkOperateResult
+					ret.Network = *net
+					byteContent := ret.Marshal()
 					log.Logger.Debug("Marshal data:%v", string(byteContent))
 
 					err = etcd.UpdateNetworkData(HostIP, net.Name, string(byteContent))
@@ -352,12 +363,12 @@ func checkNetworkParamExists(network string) bool {
 }
 
 //返回创建的网络
-type CreateNetworkResult struct {
+type NetworkOperateResult struct {
 	Network fsouza.Network `json:"network"` //成功是保存创建出来的网络数据
 	ErrMsg  string         `json:"errMsg"`  //保存创建失败时的错误信息
 }
 
-func (this CreateNetworkResult) Marshal() []byte {
+func (this NetworkOperateResult) Marshal() []byte {
 	byteContent, err := json.Marshal(this)
 	if err != nil {
 		return []byte("")
@@ -396,7 +407,7 @@ func HandleEtcdNetworkParamEvent(eventChan <-chan etcd.EtcdNetworkParamEvent) {
 				}
 
 				var opt fsouza.CreateNetworkOptions
-				result := CreateNetworkResult{}
+				result := NetworkOperateResult{}
 				err := json.Unmarshal([]byte(paramByteContent), &opt)
 				if err != nil {
 					err := fmt.Sprintf("unable to unmarshal %v : %v\n", paramByteContent, err)
@@ -542,7 +553,7 @@ func HandleEtcdNetworkParamEvent(eventChan <-chan etcd.EtcdNetworkParamEvent) {
 					return
 				}
 
-				var ret CreateNetworkResult
+				var ret NetworkOperateResult
 				err = json.Unmarshal([]byte(localNetworkString), &ret)
 				if err != nil {
 					log.Logger.Debug("delete====> get real local network info fail : %v", err)
@@ -693,11 +704,7 @@ func main() {
 		os.Exit(1)
 	}
 	log.CloseDebug()
-	/*
-		if os.Getenv("APPNET_DEBUG") != "true" {
-			log.CloseDebug()
-		}
-	*/
+	//动态启动调试机制
 	go Trap()
 
 	HostIP = os.Getenv("CATTLE_AGENT_IP")
