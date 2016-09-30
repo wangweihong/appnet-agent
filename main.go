@@ -179,11 +179,16 @@ func HandleEtcdNetworkEvent(eventChan <-chan etcd.EtcdNetworkEvent) {
 				log.Logger.Error("unable to inspect network:%v", err)
 			}
 
-			byteContent2, err := json.Marshal(fullnet)
-			if err != nil {
-				log.Logger.Error("unable to json marshal:%v", err)
-				continue
-			}
+			var ret NetworkOperateResult
+			ret.Network = *fullnet
+			/*
+				byteContent2, err := json.Marshal(fullnet)
+				if err != nil {
+					log.Logger.Error("unable to json marshal:%v", err)
+					continue
+				}
+			*/
+			byteContent2 := ret.Marshal()
 			log.Logger.Debug("Marshal data:%v", string(byteContent2))
 
 			err = etcd.CreateNetworkData(HostIP, net.Name, string(byteContent2))
